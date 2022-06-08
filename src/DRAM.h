@@ -12,6 +12,8 @@
 #include <type_traits>
 #include "Request.h"
 
+#include <random>
+
 using namespace std;
 
 namespace ramulator
@@ -101,6 +103,8 @@ public:
     } wisectrl;
 
     RowTable<T>* rowtable;
+    vector<int> bankids;
+    std::default_random_engine rand_eng;
 
     void train_batch(Request req, long clk);
     bool wise_check(Request req);
@@ -209,7 +213,7 @@ void DRAM<T>::finish(long dram_cycles) {
 // Constructor
 template <typename T>
 DRAM<T>::DRAM(T* spec, typename T::Level level) :
-    spec(spec), level(level), id(0), parent(NULL)
+    spec(spec), level(level), id(0), parent(NULL), rand_eng(std::default_random_engine(time(nullptr)))
 {
 
     state = spec->start[(int)level];
@@ -246,7 +250,13 @@ DRAM<T>::DRAM(T* spec, typename T::Level level) :
         children.push_back(child);
     }
 
-    wisectrl.subreq_cnts.resize(child_max, 0);
+    if(int(level) == 2) {
+        wisectrl.subreq_cnts.resize(child_max, 0);
+        bankids.resize(spec->org_entry.count[int(T::Level::Bank)]);
+        for(int bankid = 0; bankid < bankids.size(); ++bankid) {
+            bankids.at(bankid) = bankid;
+        }
+    }
 
 }
 
@@ -500,7 +510,7 @@ void DRAM<T>::train_batch(Request req, long clk) {
             ++wisectrl.subreq_cnts.at(addr_vec[int(T::Level::Bank)]);
             bool all_finish = true;
             for(const auto& subreq_cnt : wisectrl.subreq_cnts) {
-                if(subreq_cnt < ((wisectrl.req.ent_id_size * 2 + wisectrl.req.rel_id_size) * wisectrl.req.num_edges - 1)
+                if(subreq_cnt < ((wisectrl.req.ent_id_size * 2/* + wisectrl.req.rel_id_size*/) * wisectrl.req.num_edges - 1)
                     / (spec->channel_width * children.size()) + 1) {
                     all_finish = false;
                     break;
@@ -509,17 +519,6 @@ void DRAM<T>::train_batch(Request req, long clk) {
             if(all_finish) {
                 wisectrl.busy = false;
             }
-            /*if(wisectrl.cnt < ((wisectrl.req.ent_id_size * 2 + wisectrl.req.rel_id_size) * wisectrl.req.num_edges - 1) / (spec->channel_width * children.size()) + 1) {
-                wisectrl.req.addr_vec[int(T::Level::Bank)] = 0;
-                ++wisectrl.req.addr_vec[int(T::Level::Column)];
-                if(wisectrl.req.addr_vec[int(T::Level::Column)] == spec->org_entry.count[int(T::Level::Column)]) {
-                    wisectrl.req.addr_vec[int(T::Level::Column)] = 0;
-                    ++wisectrl.req.addr_vec[int(T::Level::Row)];
-                    assert(wisectrl.req.addr_vec[int(T::Level::Row)] <= spec->org_entry.count[int(T::Level::Row)]);
-                }
-            } else {
-                wisectrl.busy = false;
-            }*/
         }
     }
 }
@@ -537,17 +536,20 @@ void DRAM<T>::tick(long clk) {
         if(wisectrl.busy) {
             vector<int> addr_vec(wisectrl.req.addr_vec);
 
-            for(int bankid = 0; bankid < children.size(); ++bankid) {
-                if(wisectrl.subreq_cnts.at(bankid) == ((wisectrl.req.ent_id_size * 2 + wisectrl.req.rel_id_size) * wisectrl.req.num_edges - 1)
+            std::shuffle(bankids.begin(), bankids.end(), rand_eng);
+
+            for(const auto& bankid : bankids) {
+                if(wisectrl.subreq_cnts.at(bankid) == ((wisectrl.req.ent_id_size * 2/* + wisectrl.req.rel_id_size*/) * wisectrl.req.num_edges - 1)
                     / (spec->channel_width * children.size()) + 1) {
                     continue;
                 }
 
                 addr_vec.at(int(T::Level::Bank)) = bankid;
                 addr_vec.at(int(T::Level::Row)) = wisectrl.req.addr_vec.at(int(T::Level::Row))
-                    + (wisectrl.req.addr_vec.at(int(T::Level::Column)) + wisectrl.subreq_cnts.at(bankid)) / spec->org_entry.count[int(T::Level::Column)];
+                    + (wisectrl.req.addr_vec.at(int(T::Level::Column)) + wisectrl.subreq_cnts.at(bankid))
+                    / (spec->org_entry.count[int(T::Level::Column)] / spec->prefetch_size);
                 addr_vec.at(int(T::Level::Column)) = (wisectrl.req.addr_vec.at(int(T::Level::Column)) + wisectrl.subreq_cnts.at(bankid))
-                    % spec->org_entry.count[int(T::Level::Column)];
+                    % (spec->org_entry.count[int(T::Level::Column)] / spec->prefetch_size);
 
                 typename T::Command cmd = decode(spec->translate[int(Request::Type::READ)], addr_vec.data());
                 if(cmd == T::Command::ACT ? parent->check(cmd, addr_vec.data(), clk) : check(cmd, addr_vec.data(), clk)) {
@@ -567,7 +569,7 @@ void DRAM<T>::tick(long clk) {
                         ++wisectrl.subreq_cnts.at(bankid);
                         bool all_finish = true;
                         for(const auto& subreq_cnt : wisectrl.subreq_cnts) {
-                            if(subreq_cnt < ((wisectrl.req.ent_id_size * 2 + wisectrl.req.rel_id_size) * wisectrl.req.num_edges - 1)
+                            if(subreq_cnt < ((wisectrl.req.ent_id_size * 2/* + wisectrl.req.rel_id_size*/) * wisectrl.req.num_edges - 1)
                                 / (spec->channel_width * children.size()) + 1) {
                                 all_finish = false;
                                 break;
