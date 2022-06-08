@@ -96,8 +96,7 @@ public:
     // WiseDRAM
     struct _wisectrl {
         Request req;
-        int cnt;
-        vector<char> subreq_finished;
+        vector<int> subreq_cnts;
         bool busy;
     } wisectrl;
 
@@ -247,7 +246,7 @@ DRAM<T>::DRAM(T* spec, typename T::Level level) :
         children.push_back(child);
     }
 
-    wisectrl.subreq_finished.resize(child_max, 0);
+    wisectrl.subreq_cnts.resize(child_max, 0);
 
 }
 
@@ -477,57 +476,50 @@ void DRAM<T>::train_batch(Request req, long clk) {
     cur_clk = clk;
     wisectrl.busy = true;
     wisectrl.req = req;
-    wisectrl.cnt = 0;
-    typename T::Command cmd = decode(spec->translate[int(Request::Type::READ)], wisectrl.req.addr_vec.data());
-    if(cmd == T::Command::ACT ? parent->check(cmd, wisectrl.req.addr_vec.data(), clk) : check(cmd, wisectrl.req.addr_vec.data(), clk)) {
+    for(auto& subreq_cnt : wisectrl.subreq_cnts) {
+        subreq_cnt = 0;
+    }
+
+    vector<int> addr_vec(wisectrl.req.addr_vec);
+
+    typename T::Command cmd = decode(spec->translate[int(Request::Type::READ)], addr_vec.data());
+    if(cmd == T::Command::ACT ? parent->check(cmd, addr_vec.data(), clk) : check(cmd, addr_vec.data(), clk)) {
         if(cmd == T::Command::ACT) {
-            parent->update(cmd, wisectrl.req.addr_vec.data(), clk);
+            parent->update(cmd, addr_vec.data(), clk);
         } else {
-            update(cmd, wisectrl.req.addr_vec.data(), clk);
+            update(cmd, addr_vec.data(), clk);
         }
-        rowtable->update(cmd, wisectrl.req.addr_vec, clk);
+        rowtable->update(cmd, addr_vec, clk);
 
         printf("%5s %10ld:", spec->command_name[int(cmd)].c_str(), clk);
         for (int lev = 0; lev < int(T::Level::MAX); lev++)
-            printf(" %5d", wisectrl.req.addr_vec[lev]);
+            printf(" %5d", addr_vec[lev]);
         printf("\n");
 
         if(cmd == spec->translate[int(Request::Type::READ)]) {
-            wisectrl.subreq_finished.at(wisectrl.req.addr_vec[int(T::Level::Bank)]) = 1;
-            bool allfin = true;
-            for(const auto& fin : wisectrl.subreq_finished) {
-                if(!fin) {
-                    allfin = false;
+            ++wisectrl.subreq_cnts.at(addr_vec[int(T::Level::Bank)]);
+            bool all_finish = true;
+            for(const auto& subreq_cnt : wisectrl.subreq_cnts) {
+                if(subreq_cnt < ((wisectrl.req.ent_id_size * 2 + wisectrl.req.rel_id_size) * wisectrl.req.num_edges - 1)
+                    / (spec->channel_width * children.size()) + 1) {
+                    all_finish = false;
                     break;
                 }
             }
-            if(allfin) {
-                ++wisectrl.cnt;
-                for(auto& fin : wisectrl.subreq_finished) {
-                    fin = 0;
-                }
-                if(wisectrl.cnt < ((wisectrl.req.ent_id_size * 2 + wisectrl.req.rel_id_size) * wisectrl.req.num_edges - 1) / (spec->channel_width * children.size()) + 1) {
-                    wisectrl.req.addr_vec[int(T::Level::Bank)] = 0;
-                    ++wisectrl.req.addr_vec[int(T::Level::Column)];
-                    if(wisectrl.req.addr_vec[int(T::Level::Column)] == spec->org_entry.count[int(T::Level::Column)]) {
-                        wisectrl.req.addr_vec[int(T::Level::Column)] = 0;
-                        ++wisectrl.req.addr_vec[int(T::Level::Row)];
-                        assert(wisectrl.req.addr_vec[int(T::Level::Row)] <= spec->org_entry.count[int(T::Level::Row)]);
-                    }
-                } else {
-                    wisectrl.busy = false;
+            if(all_finish) {
+                wisectrl.busy = false;
+            }
+            /*if(wisectrl.cnt < ((wisectrl.req.ent_id_size * 2 + wisectrl.req.rel_id_size) * wisectrl.req.num_edges - 1) / (spec->channel_width * children.size()) + 1) {
+                wisectrl.req.addr_vec[int(T::Level::Bank)] = 0;
+                ++wisectrl.req.addr_vec[int(T::Level::Column)];
+                if(wisectrl.req.addr_vec[int(T::Level::Column)] == spec->org_entry.count[int(T::Level::Column)]) {
+                    wisectrl.req.addr_vec[int(T::Level::Column)] = 0;
+                    ++wisectrl.req.addr_vec[int(T::Level::Row)];
+                    assert(wisectrl.req.addr_vec[int(T::Level::Row)] <= spec->org_entry.count[int(T::Level::Row)]);
                 }
             } else {
-                ++wisectrl.req.addr_vec[int(T::Level::Bank)];
-                if(wisectrl.req.addr_vec[int(T::Level::Bank)] == wisectrl.subreq_finished.size()) {
-                    wisectrl.req.addr_vec[int(T::Level::Bank)] = 0;
-                }
-            }
-        } else {
-            ++wisectrl.req.addr_vec[int(T::Level::Bank)];
-            if(wisectrl.req.addr_vec[int(T::Level::Bank)] == wisectrl.subreq_finished.size()) {
-                wisectrl.req.addr_vec[int(T::Level::Bank)] = 0;
-            }
+                wisectrl.busy = false;
+            }*/
         }
     }
 }
@@ -543,56 +535,49 @@ void DRAM<T>::tick(long clk) {
     if(int(level) == 2) {
         cur_clk = clk;
         if(wisectrl.busy) {
-            typename T::Command cmd = decode(spec->translate[int(Request::Type::READ)], wisectrl.req.addr_vec.data());
-            if(cmd == T::Command::ACT ? parent->check(cmd, wisectrl.req.addr_vec.data(), clk) : check(cmd, wisectrl.req.addr_vec.data(), clk)) {
-                if(cmd == T::Command::ACT) {
-                    parent->update(cmd, wisectrl.req.addr_vec.data(), clk);
-                } else {
-                    update(cmd, wisectrl.req.addr_vec.data(), clk);
+            vector<int> addr_vec(wisectrl.req.addr_vec);
+
+            for(int bankid = 0; bankid < children.size(); ++bankid) {
+                if(wisectrl.subreq_cnts.at(bankid) == ((wisectrl.req.ent_id_size * 2 + wisectrl.req.rel_id_size) * wisectrl.req.num_edges - 1)
+                    / (spec->channel_width * children.size()) + 1) {
+                    continue;
                 }
-                rowtable->update(cmd, wisectrl.req.addr_vec, clk);
 
-                printf("%5s %10ld:", spec->command_name[int(cmd)].c_str(), clk);
-                for (int lev = 0; lev < int(T::Level::MAX); lev++)
-                    printf(" %5d", wisectrl.req.addr_vec[lev]);
-                printf("\n");
+                addr_vec.at(int(T::Level::Bank)) = bankid;
+                addr_vec.at(int(T::Level::Row)) = wisectrl.req.addr_vec.at(int(T::Level::Row))
+                    + (wisectrl.req.addr_vec.at(int(T::Level::Column)) + wisectrl.subreq_cnts.at(bankid)) / spec->org_entry.count[int(T::Level::Column)];
+                addr_vec.at(int(T::Level::Column)) = (wisectrl.req.addr_vec.at(int(T::Level::Column)) + wisectrl.subreq_cnts.at(bankid))
+                    % spec->org_entry.count[int(T::Level::Column)];
 
-                if(cmd == spec->translate[int(Request::Type::READ)]) {
-                    wisectrl.subreq_finished.at(wisectrl.req.addr_vec[int(T::Level::Bank)]) = 1;
-                    bool allfin = true;
-                    for(const auto& fin : wisectrl.subreq_finished) {
-                        if(!fin) {
-                            allfin = false;
-                            break;
-                        }
+                typename T::Command cmd = decode(spec->translate[int(Request::Type::READ)], addr_vec.data());
+                if(cmd == T::Command::ACT ? parent->check(cmd, addr_vec.data(), clk) : check(cmd, addr_vec.data(), clk)) {
+                    if(cmd == T::Command::ACT) {
+                        parent->update(cmd, addr_vec.data(), clk);
+                    } else {
+                        update(cmd, addr_vec.data(), clk);
                     }
-                    if(allfin) {
-                        ++wisectrl.cnt;
-                        for(auto& fin : wisectrl.subreq_finished) {
-                            fin = 0;
-                        }
-                        if(wisectrl.cnt < ((wisectrl.req.ent_id_size * 2 + wisectrl.req.rel_id_size) * wisectrl.req.num_edges - 1) / (spec->channel_width * children.size()) + 1) {
-                            wisectrl.req.addr_vec[int(T::Level::Bank)] = 0;
-                            ++wisectrl.req.addr_vec[int(T::Level::Column)];
-                            if(wisectrl.req.addr_vec[int(T::Level::Column)] == spec->org_entry.count[int(T::Level::Column)]) {
-                                wisectrl.req.addr_vec[int(T::Level::Column)] = 0;
-                                ++wisectrl.req.addr_vec[int(T::Level::Row)];
-                                assert(wisectrl.req.addr_vec[int(T::Level::Row)] <= spec->org_entry.count[int(T::Level::Row)]);
+                    rowtable->update(cmd, addr_vec, clk);
+
+                    printf("%5s %10ld:", spec->command_name[int(cmd)].c_str(), clk);
+                    for (int lev = 0; lev < int(T::Level::MAX); lev++)
+                        printf(" %5d", addr_vec[lev]);
+                    printf("\n");
+
+                    if(cmd == spec->translate[int(Request::Type::READ)]) {
+                        ++wisectrl.subreq_cnts.at(bankid);
+                        bool all_finish = true;
+                        for(const auto& subreq_cnt : wisectrl.subreq_cnts) {
+                            if(subreq_cnt < ((wisectrl.req.ent_id_size * 2 + wisectrl.req.rel_id_size) * wisectrl.req.num_edges - 1)
+                                / (spec->channel_width * children.size()) + 1) {
+                                all_finish = false;
+                                break;
                             }
-                        } else {
+                        }
+                        if(all_finish) {
                             wisectrl.busy = false;
                         }
-                    } else {
-                        ++wisectrl.req.addr_vec[int(T::Level::Bank)];
-                        if(wisectrl.req.addr_vec[int(T::Level::Bank)] == wisectrl.subreq_finished.size()) {
-                            wisectrl.req.addr_vec[int(T::Level::Bank)] = 0;
-                        }
                     }
-                } else {
-                    ++wisectrl.req.addr_vec[int(T::Level::Bank)];
-                    if(wisectrl.req.addr_vec[int(T::Level::Bank)] == wisectrl.subreq_finished.size()) {
-                        wisectrl.req.addr_vec[int(T::Level::Bank)] = 0;
-                    }
+                    break;
                 }
             }
         }

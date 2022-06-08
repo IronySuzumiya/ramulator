@@ -398,8 +398,6 @@ public:
             is_valid_req = (req != queue->q.end());
 
             if(is_valid_req){
-                cmd = get_first_cmd(req);
-
                 if(req->type == Request::Type::TRAIN_BATCH) {
                     int rank_id = req->addr_vec.at(int(channel->level) + 1);
                     rank = channel->children.at(rank_id);
@@ -408,6 +406,7 @@ public:
 
                     is_valid_req = bank_group->wise_check(*req);
                 } else {
+                    cmd = get_first_cmd(req);
                     is_valid_req = is_ready(cmd, req->addr_vec);
                 }
             }
