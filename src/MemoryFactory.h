@@ -8,8 +8,8 @@
 #include "Config.h"
 #include "Memory.h"
 
-#include "WideIO2.h"
-#include "SALP.h"
+//#include "WideIO2.h"
+//#include "SALP.h"
 
 using namespace std;
 
@@ -72,10 +72,10 @@ public:
     }
 };
 
-template <>
+/*template <>
 MemoryBase *MemoryFactory<WideIO2>::create(const Config& configs, int cacheline);
 template <>
-MemoryBase *MemoryFactory<SALP>::create(const Config& configs, int cacheline);
+MemoryBase *MemoryFactory<SALP>::create(const Config& configs, int cacheline);*/
 
 } /*namespace ramulator*/
 

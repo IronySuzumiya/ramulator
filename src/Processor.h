@@ -27,6 +27,8 @@ public:
     // [address(hex)] [R/W]
     bool get_dramtrace_request(long& req_addr, Request::Type& req_type);
 
+    bool get_wisedram_request(Request& req);
+
     long expected_limit_insts = 0;
 
 private:

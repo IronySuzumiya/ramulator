@@ -27,12 +27,21 @@ public:
         POWERDOWN,
         SELFREFRESH,
         EXTENSION,
+        TRAIN_BATCH,
         MAX
     } type;
 
     long arrive = -1;
     long depart = -1;
     function<void(Request&)> callback; // call back with more info
+
+    int algo_code; // 0: TRANSE, 1: TRANSH, 2: TRANSR, 3: DistMult, 4: ComplEX
+    int ent_id_size;
+    int rel_id_size;
+    int num_edges;
+    int emb_val_size;
+    int emb_dim;
+    int num_negs_per_bank;
 
     Request(long addr, Type type, int coreid = 0)
         : is_first_command(true), addr(addr), coreid(coreid), type(type),

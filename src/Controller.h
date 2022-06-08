@@ -17,7 +17,7 @@
 #include "Statistics.h"
 
 #include "ALDRAM.h"
-#include "SALP.h"
+//#include "SALP.h"
 #include "TLDRAM.h"
 
 using namespace std;
@@ -123,6 +123,8 @@ public:
             for (unsigned int i = 0; i < channel->children.size(); i++)
                 cmd_trace_files[i].open(prefix + to_string(i) + suffix);
         }
+
+        channel->set_rowtable(rowtable);
 
         // regStats
 
@@ -331,6 +333,8 @@ public:
 
     void tick()
     {
+        channel->tick(clk);
+
         clk++;
         req_queue_length_sum += readq.size() + writeq.size() + pending.size();
         read_req_queue_length_sum += readq.size() + pending.size();
@@ -380,6 +384,9 @@ public:
             is_valid_req = is_ready(cmd, req->addr_vec);
         }
 
+        DRAM<T>* rank = nullptr;
+        DRAM<T>* bank_group = nullptr;
+
         if (!is_valid_req) {
             queue = !write_mode ? &readq : &writeq;
 
@@ -392,7 +399,17 @@ public:
 
             if(is_valid_req){
                 cmd = get_first_cmd(req);
-                is_valid_req = is_ready(cmd, req->addr_vec);
+
+                if(req->type == Request::Type::TRAIN_BATCH) {
+                    int rank_id = req->addr_vec.at(int(channel->level) + 1);
+                    rank = channel->children.at(rank_id);
+                    int bank_group_id = req->addr_vec.at(int(rank->level) + 1);
+                    bank_group = rank->children.at(bank_group_id);
+
+                    is_valid_req = bank_group->wise_check(*req);
+                } else {
+                    is_valid_req = is_ready(cmd, req->addr_vec);
+                }
             }
         }
 
@@ -409,7 +426,7 @@ public:
         if (req->is_first_command) {
             req->is_first_command = false;
             int coreid = req->coreid;
-            if (req->type == Request::Type::READ || req->type == Request::Type::WRITE) {
+            if (req->type == Request::Type::READ || req->type == Request::Type::WRITE || req->type == Request::Type::TRAIN_BATCH) {
               channel->update_serving_requests(req->addr_vec.data(), 1, clk);
             }
             int tx = (channel->spec->prefetch_size * channel->spec->channel_width / 8);
@@ -437,22 +454,41 @@ public:
                   ++row_misses;
               }
               write_transaction_bytes += tx;
+            } else {
+
             }
         }
 
-        // issue command on behalf of request
-        issue_cmd(cmd, get_addr_vec(cmd, req));
+        if(req->type != Request::Type::TRAIN_BATCH) {
+            // issue command on behalf of request
+            issue_cmd(cmd, get_addr_vec(cmd, req));
+        } else {
+            //assert(is_ready(cmd, addr_vec));
+            //channel->update(cmd, addr_vec.data(), clk);
+
+            bank_group->train_batch(*req, clk);
+    
+            //rowtable->update(cmd, addr_vec, clk);
+            /*if (print_cmd_trace){
+                printf("%5s %10ld:", channel->spec->command_name[int(cmd)].c_str(), clk);
+                for (int lev = 0; lev < int(T::Level::MAX); lev++)
+                    printf(" %5d", addr_vec[lev]);
+                printf("\n");
+            }*/
+        }
 
         // check whether this is the last command (which finishes the request)
         //if (cmd != channel->spec->translate[int(req->type)]){
-        if (cmd != channel->spec->translate[int(req->type)]) {
-            if(channel->spec->is_opening(cmd)) {
-                // promote the request that caused issuing activation to actq
-                actq.q.push_back(*req);
-                queue->q.erase(req);
-            }
+        if(req->type != Request::Type::TRAIN_BATCH) {
+            if (cmd != channel->spec->translate[int(req->type)]) {
+                if(channel->spec->is_opening(cmd)) {
+                    // promote the request that caused issuing activation to actq
+                    actq.q.push_back(*req);
+                    queue->q.erase(req);
+                }
 
-            return;
+                return;
+            }
         }
 
         // set a future completion time for read requests
@@ -635,12 +671,12 @@ private:
     }
 };
 
-template <>
+/*template <>
 vector<int> Controller<SALP>::get_addr_vec(
     SALP::Command cmd, list<Request>::iterator req);
 
 template <>
-bool Controller<SALP>::is_ready(list<Request>::iterator req);
+bool Controller<SALP>::is_ready(list<Request>::iterator req);*/
 
 template <>
 void Controller<ALDRAM>::update_temp(ALDRAM::Temp current_temperature);

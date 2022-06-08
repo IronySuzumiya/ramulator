@@ -20,19 +20,57 @@
 #include "GDDR5.h"
 #include "LPDDR3.h"
 #include "LPDDR4.h"
-#include "WideIO.h"
-#include "WideIO2.h"
+//#include "WideIO.h"
+//#include "WideIO2.h"
 #include "HBM.h"
-#include "SALP.h"
+//#include "SALP.h"
 #include "ALDRAM.h"
 #include "TLDRAM.h"
 #include "STTMRAM.h"
 #include "PCM.h"
 
+#include "DDR4_PIM.h"
+
 using namespace std;
 using namespace ramulator;
 
 bool ramulator::warmup_complete = false;
+
+template<typename T>
+void run_wisedramtrace(const Config& configs, Memory<T, Controller>& memory, const char* tracename) {
+
+    /* initialize DRAM trace */
+    Trace trace(tracename);
+
+    /* run simulation */
+    bool stall = false, end = false;
+    int clks = 0;
+    auto req_complete = [](Request& r){};
+
+    Request req(0, Request::Type::TRAIN_BATCH, req_complete);
+
+    while (!end || memory.pending_requests()){
+        if (!end && !stall){
+            end = !trace.get_wisedram_request(req);
+        }
+
+        if (!end){
+            stall = !memory.send(req);
+        }
+        else {
+            memory.set_high_writeq_watermark(0.0f); // make sure that all write requests in the
+                                                    // write queue are drained
+        }
+
+        memory.tick();
+        clks ++;
+        Stats::curTick++; // memory clock, global, for Statistics
+    }
+    // This a workaround for statistics set only initially lost in the end
+    memory.finish();
+    Stats::statlist.printall();
+
+}
 
 template<typename T>
 void run_dramtrace(const Config& configs, Memory<T, Controller>& memory, const char* tracename) {
@@ -164,6 +202,8 @@ void start_run(const Config& configs, T* spec, const vector<const char*>& files)
     channel->regStats("");
     Controller<T>* ctrl = new Controller<T>(configs, channel);
     ctrls.push_back(ctrl);
+
+
   }
   Memory<T, Controller> memory(configs, ctrls);
 
@@ -172,6 +212,8 @@ void start_run(const Config& configs, T* spec, const vector<const char*>& files)
     run_cputrace(configs, memory, files);
   } else if (configs["trace_type"] == "DRAM") {
     run_dramtrace(configs, memory, files[0]);
+  } else if (configs["trace_type"] == "WiseDRAM") {
+    run_wisedramtrace(configs, memory, files[0]);
   }
 }
 
@@ -194,6 +236,8 @@ int main(int argc, const char *argv[])
       configs.add("trace_type", "CPU");
     } else if (strcmp(trace_type, "dram") == 0) {
       configs.add("trace_type", "DRAM");
+    } else if (strcmp(trace_type, "wisedram") == 0) {
+      configs.add("trace_type", "WiseDRAM");
     } else {
       printf("invalid trace type: %s\n", trace_type);
       assert(false);
@@ -227,9 +271,9 @@ int main(int argc, const char *argv[])
     } else if (standard == "DDR4") {
       DDR4* ddr4 = new DDR4(configs["org"], configs["speed"]);
       start_run(configs, ddr4, files);
-    } else if (standard == "SALP-MASA") {
+    /*} else if (standard == "SALP-MASA") {
       SALP* salp8 = new SALP(configs["org"], configs["speed"], "SALP-MASA", configs.get_subarrays());
-      start_run(configs, salp8, files);
+      start_run(configs, salp8, files);*/
     } else if (standard == "LPDDR3") {
       LPDDR3* lpddr3 = new LPDDR3(configs["org"], configs["speed"]);
       start_run(configs, lpddr3, files);
@@ -243,7 +287,7 @@ int main(int argc, const char *argv[])
     } else if (standard == "HBM") {
       HBM* hbm = new HBM(configs["org"], configs["speed"]);
       start_run(configs, hbm, files);
-    } else if (standard == "WideIO") {
+    /*} else if (standard == "WideIO") {
       // total cap: 1GB, 1/4 of others
       WideIO* wio = new WideIO(configs["org"], configs["speed"]);
       start_run(configs, wio, files);
@@ -251,7 +295,7 @@ int main(int argc, const char *argv[])
       // total cap: 2GB, 1/2 of others
       WideIO2* wio2 = new WideIO2(configs["org"], configs["speed"], configs.get_channels());
       wio2->channel_width *= 2;
-      start_run(configs, wio2, files);
+      start_run(configs, wio2, files);*/
     } else if (standard == "STTMRAM") {
       STTMRAM* sttmram = new STTMRAM(configs["org"], configs["speed"]);
       start_run(configs, sttmram, files);
@@ -269,6 +313,9 @@ int main(int argc, const char *argv[])
     } else if (standard == "TLDRAM") {
       TLDRAM* tldram = new TLDRAM(configs["org"], configs["speed"], configs.get_subarrays());
       start_run(configs, tldram, files);
+    } else if (standard == "DDR4_PIM") {
+      DDR4_PIM* ddr4_pim = new DDR4_PIM(configs["org"], configs["speed"]);
+      start_run(configs, ddr4_pim, files);
     }
 
     printf("Simulation done. Statistics written to %s\n", stats_out.c_str());

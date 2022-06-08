@@ -1,9 +1,9 @@
 #include "MemoryFactory.h"
 #include "LPDDR4.h"
-#include "WideIO.h"
-#include "WideIO2.h"
+//#include "WideIO.h"
+//#include "WideIO2.h"
 #include "HBM.h"
-#include "SALP.h"
+//#include "SALP.h"
 
 using namespace ramulator;
 
@@ -15,23 +15,23 @@ void MemoryFactory<LPDDR4>::validate(int channels, int ranks, const Config& conf
     assert(channels >= 2 && "LPDDR4 requires 2, 4, 8 ... channels");
 }
 
-template <>
+/*template <>
 void MemoryFactory<WideIO>::validate(int channels, int ranks, const Config& configs) {
     assert(channels == 4 && "WideIO comes with 4 channels");
-}
+}*/
 
-template <>
+/*template <>
 void MemoryFactory<WideIO2>::validate(int channels, int ranks, const Config& configs) {
     assert((channels == 4 || channels == 8) && "WideIO2 comes with 4 or 8 channels");
     assert((ranks == 1 || ranks == 2) && "WideIO2 comes with 1 or 2 ranks");
-}
+}*/
 
 template <>
 void MemoryFactory<HBM>::validate(int channels, int ranks, const Config& configs) {
     assert(channels == 8 && "HBM comes with 8 channels");
 }
 
-template <>
+/*template <>
 MemoryBase *MemoryFactory<WideIO2>::create(const Config& configs, int cacheline) {
     int channels = stoi(configs["channels"], NULL, 0);
     int ranks = stoi(configs["ranks"], NULL, 0);
@@ -45,10 +45,10 @@ MemoryBase *MemoryFactory<WideIO2>::create(const Config& configs, int cacheline)
     extend_channel_width(spec, cacheline);
 
     return (MemoryBase *)populate_memory(configs, spec, channels, ranks);
-}
+}*/
 
 
-template <>
+/*template <>
 MemoryBase *MemoryFactory<SALP>::create(const Config& configs, int cacheline) {
     int channels = stoi(configs["channels"], NULL, 0);
     int ranks = stoi(configs["ranks"], NULL, 0);
@@ -64,7 +64,7 @@ MemoryBase *MemoryFactory<SALP>::create(const Config& configs, int cacheline) {
     extend_channel_width(spec, cacheline);
 
     return (MemoryBase *)populate_memory(configs, spec, channels, ranks);
-}
+}*/
 
 }
 

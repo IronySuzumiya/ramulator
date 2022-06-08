@@ -1,6 +1,9 @@
 #include "Processor.h"
 #include <cassert>
 
+#include <boost/algorithm/string.hpp>
+#include <boost/algorithm/string/trim.hpp>
+
 using namespace std;
 using namespace ramulator;
 
@@ -470,4 +473,28 @@ bool Trace::get_dramtrace_request(long& req_addr, Request::Type& req_type)
         req_type = Request::Type::WRITE;
     else assert(false);
     return true;
+}
+
+bool Trace::get_wisedram_request(Request& req) {
+  string line;
+  getline(file, line);
+  if (file.eof()) {
+      return false;
+  }
+
+  std::vector<std::string> token;
+
+  boost::algorithm::split(token, line, boost::is_any_of(" "));
+
+  size_t pos;
+  req.addr = std::stoul(token.at(0), &pos, 16);
+  req.algo_code = std::stoul(token.at(1), &pos);
+  req.ent_id_size = std::stoul(token.at(2), &pos);
+  req.rel_id_size = std::stoul(token.at(3), &pos);
+  req.num_edges = std::stoul(token.at(4), &pos);
+  req.emb_val_size = std::stoul(token.at(5), &pos);
+  req.emb_dim = std::stoul(token.at(6), &pos);
+  req.num_negs_per_bank = std::stoul(token.at(7), &pos);
+
+  return true;
 }

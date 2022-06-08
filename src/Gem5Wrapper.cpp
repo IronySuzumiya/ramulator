@@ -10,10 +10,10 @@
 #include "LPDDR3.h"
 #include "LPDDR4.h"
 #include "GDDR5.h"
-#include "WideIO.h"
-#include "WideIO2.h"
+//#include "WideIO.h"
+//#include "WideIO2.h"
 #include "HBM.h"
-#include "SALP.h"
+//#include "SALP.h"
 
 using namespace ramulator;
 
@@ -21,9 +21,9 @@ static map<string, function<MemoryBase *(const Config&, int)> > name_to_func = {
     {"DDR3", &MemoryFactory<DDR3>::create}, {"DDR4", &MemoryFactory<DDR4>::create},
     {"LPDDR3", &MemoryFactory<LPDDR3>::create}, {"LPDDR4", &MemoryFactory<LPDDR4>::create},
     {"GDDR5", &MemoryFactory<GDDR5>::create}, 
-    {"WideIO", &MemoryFactory<WideIO>::create}, {"WideIO2", &MemoryFactory<WideIO2>::create},
+    //{"WideIO", &MemoryFactory<WideIO>::create}, {"WideIO2", &MemoryFactory<WideIO2>::create},
     {"HBM", &MemoryFactory<HBM>::create},
-    {"SALP-1", &MemoryFactory<SALP>::create}, {"SALP-2", &MemoryFactory<SALP>::create}, {"SALP-MASA", &MemoryFactory<SALP>::create},
+    //{"SALP-1", &MemoryFactory<SALP>::create}, {"SALP-2", &MemoryFactory<SALP>::create}, {"SALP-MASA", &MemoryFactory<SALP>::create},
 };
 
 

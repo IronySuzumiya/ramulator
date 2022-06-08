@@ -1,5 +1,5 @@
 #include "Controller.h"
-#include "SALP.h"
+//#include "SALP.h"
 #include "ALDRAM.h"
 #include "TLDRAM.h"
 
@@ -8,7 +8,7 @@ using namespace ramulator;
 namespace ramulator
 {
 
-static vector<int> get_offending_subarray(DRAM<SALP>* channel, vector<int> & addr_vec){
+/*static vector<int> get_offending_subarray(DRAM<SALP>* channel, vector<int> & addr_vec){
     int sa_id = 0;
     auto rank = channel->children[addr_vec[int(SALP::Level::Rank)]];
     auto bank = rank->children[addr_vec[int(SALP::Level::Bank)]];
@@ -43,7 +43,7 @@ bool Controller<SALP>::is_ready(list<Request>::iterator req){
         return channel->check(cmd, addr_vec.data(), clk);
     }
     else return channel->check(cmd, req->addr_vec.data(), clk);
-}
+}*/
 
 template <>
 void Controller<ALDRAM>::update_temp(ALDRAM::Temp current_temperature){

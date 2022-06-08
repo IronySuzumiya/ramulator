@@ -10,11 +10,15 @@
 #include <algorithm>
 #include <cassert>
 #include <type_traits>
+#include "Request.h"
 
 using namespace std;
 
 namespace ramulator
 {
+
+template <typename T>
+class RowTable;
 
 template <typename T>
 class DRAM
@@ -30,7 +34,7 @@ public:
 
     // Constructor
     DRAM(T* spec, typename T::Level level);
-    ~DRAM();
+    virtual ~DRAM();
 
     // Specification (e.g., DDR3)
     T* spec;
@@ -88,6 +92,24 @@ public:
     void regStats(const std::string& identifier);
 
     void finish(long dram_cycles);
+
+    // WiseDRAM
+    struct _wisectrl {
+        Request req;
+        int cnt;
+        vector<char> subreq_finished;
+        bool busy;
+    } wisectrl;
+
+    RowTable<T>* rowtable;
+
+    void train_batch(Request req, long clk);
+    bool wise_check(Request req);
+
+    void tick(long clk);
+    bool busy();
+
+    void set_rowtable(RowTable<T>* rowtable);
 
 private:
     // Constructor
@@ -224,6 +246,8 @@ DRAM<T>::DRAM(T* spec, typename T::Level level) :
         child->id = i;
         children.push_back(child);
     }
+
+    wisectrl.subreq_finished.resize(child_max, 0);
 
 }
 
@@ -444,6 +468,158 @@ void DRAM<T>::update_serving_requests(const int* addr, int delta, long clk) {
     return;
   }
   children[child_id]->update_serving_requests(addr, delta, clk);
+}
+
+template<typename T>
+void DRAM<T>::train_batch(Request req, long clk) {
+    assert(int(level) == 2);
+    assert(!wisectrl.busy);
+    cur_clk = clk;
+    wisectrl.busy = true;
+    wisectrl.req = req;
+    wisectrl.cnt = 0;
+    typename T::Command cmd = decode(spec->translate[int(Request::Type::READ)], wisectrl.req.addr_vec.data());
+    if(cmd == T::Command::ACT ? parent->check(cmd, wisectrl.req.addr_vec.data(), clk) : check(cmd, wisectrl.req.addr_vec.data(), clk)) {
+        if(cmd == T::Command::ACT) {
+            parent->update(cmd, wisectrl.req.addr_vec.data(), clk);
+        } else {
+            update(cmd, wisectrl.req.addr_vec.data(), clk);
+        }
+        rowtable->update(cmd, wisectrl.req.addr_vec, clk);
+
+        printf("%5s %10ld:", spec->command_name[int(cmd)].c_str(), clk);
+        for (int lev = 0; lev < int(T::Level::MAX); lev++)
+            printf(" %5d", wisectrl.req.addr_vec[lev]);
+        printf("\n");
+
+        if(cmd == spec->translate[int(Request::Type::READ)]) {
+            wisectrl.subreq_finished.at(wisectrl.req.addr_vec[int(T::Level::Bank)]) = 1;
+            bool allfin = true;
+            for(const auto& fin : wisectrl.subreq_finished) {
+                if(!fin) {
+                    allfin = false;
+                    break;
+                }
+            }
+            if(allfin) {
+                ++wisectrl.cnt;
+                for(auto& fin : wisectrl.subreq_finished) {
+                    fin = 0;
+                }
+                if(wisectrl.cnt < ((wisectrl.req.ent_id_size * 2 + wisectrl.req.rel_id_size) * wisectrl.req.num_edges - 1) / (spec->channel_width * children.size()) + 1) {
+                    wisectrl.req.addr_vec[int(T::Level::Bank)] = 0;
+                    ++wisectrl.req.addr_vec[int(T::Level::Column)];
+                    if(wisectrl.req.addr_vec[int(T::Level::Column)] == spec->org_entry.count[int(T::Level::Column)]) {
+                        wisectrl.req.addr_vec[int(T::Level::Column)] = 0;
+                        ++wisectrl.req.addr_vec[int(T::Level::Row)];
+                        assert(wisectrl.req.addr_vec[int(T::Level::Row)] <= spec->org_entry.count[int(T::Level::Row)]);
+                    }
+                } else {
+                    wisectrl.busy = false;
+                }
+            } else {
+                ++wisectrl.req.addr_vec[int(T::Level::Bank)];
+                if(wisectrl.req.addr_vec[int(T::Level::Bank)] == wisectrl.subreq_finished.size()) {
+                    wisectrl.req.addr_vec[int(T::Level::Bank)] = 0;
+                }
+            }
+        } else {
+            ++wisectrl.req.addr_vec[int(T::Level::Bank)];
+            if(wisectrl.req.addr_vec[int(T::Level::Bank)] == wisectrl.subreq_finished.size()) {
+                wisectrl.req.addr_vec[int(T::Level::Bank)] = 0;
+            }
+        }
+    }
+}
+
+template<typename T>
+bool DRAM<T>::wise_check(Request req) {
+    assert(int(level) == 2);
+    return !wisectrl.busy;
+}
+
+template<typename T>
+void DRAM<T>::tick(long clk) {
+    if(int(level) == 2) {
+        cur_clk = clk;
+        if(wisectrl.busy) {
+            typename T::Command cmd = decode(spec->translate[int(Request::Type::READ)], wisectrl.req.addr_vec.data());
+            if(cmd == T::Command::ACT ? parent->check(cmd, wisectrl.req.addr_vec.data(), clk) : check(cmd, wisectrl.req.addr_vec.data(), clk)) {
+                if(cmd == T::Command::ACT) {
+                    parent->update(cmd, wisectrl.req.addr_vec.data(), clk);
+                } else {
+                    update(cmd, wisectrl.req.addr_vec.data(), clk);
+                }
+                rowtable->update(cmd, wisectrl.req.addr_vec, clk);
+
+                printf("%5s %10ld:", spec->command_name[int(cmd)].c_str(), clk);
+                for (int lev = 0; lev < int(T::Level::MAX); lev++)
+                    printf(" %5d", wisectrl.req.addr_vec[lev]);
+                printf("\n");
+
+                if(cmd == spec->translate[int(Request::Type::READ)]) {
+                    wisectrl.subreq_finished.at(wisectrl.req.addr_vec[int(T::Level::Bank)]) = 1;
+                    bool allfin = true;
+                    for(const auto& fin : wisectrl.subreq_finished) {
+                        if(!fin) {
+                            allfin = false;
+                            break;
+                        }
+                    }
+                    if(allfin) {
+                        ++wisectrl.cnt;
+                        for(auto& fin : wisectrl.subreq_finished) {
+                            fin = 0;
+                        }
+                        if(wisectrl.cnt < ((wisectrl.req.ent_id_size * 2 + wisectrl.req.rel_id_size) * wisectrl.req.num_edges - 1) / (spec->channel_width * children.size()) + 1) {
+                            wisectrl.req.addr_vec[int(T::Level::Bank)] = 0;
+                            ++wisectrl.req.addr_vec[int(T::Level::Column)];
+                            if(wisectrl.req.addr_vec[int(T::Level::Column)] == spec->org_entry.count[int(T::Level::Column)]) {
+                                wisectrl.req.addr_vec[int(T::Level::Column)] = 0;
+                                ++wisectrl.req.addr_vec[int(T::Level::Row)];
+                                assert(wisectrl.req.addr_vec[int(T::Level::Row)] <= spec->org_entry.count[int(T::Level::Row)]);
+                            }
+                        } else {
+                            wisectrl.busy = false;
+                        }
+                    } else {
+                        ++wisectrl.req.addr_vec[int(T::Level::Bank)];
+                        if(wisectrl.req.addr_vec[int(T::Level::Bank)] == wisectrl.subreq_finished.size()) {
+                            wisectrl.req.addr_vec[int(T::Level::Bank)] = 0;
+                        }
+                    }
+                } else {
+                    ++wisectrl.req.addr_vec[int(T::Level::Bank)];
+                    if(wisectrl.req.addr_vec[int(T::Level::Bank)] == wisectrl.subreq_finished.size()) {
+                        wisectrl.req.addr_vec[int(T::Level::Bank)] = 0;
+                    }
+                }
+            }
+        }
+    } else {
+        for (auto child : children) child->tick(clk);
+    }
+}
+
+template<typename T>
+bool DRAM<T>::busy() {
+    if(int(level) < 2) {
+        for(auto child : children) {
+            if(child->busy()) {
+                return true;
+            }
+        }
+        return false;
+    } else {
+        return wisectrl.busy;
+    }
+}
+
+template<typename T>
+void DRAM<T>::set_rowtable(RowTable<T>* rowtable) {
+    this->rowtable = rowtable;
+
+    for(auto& child : children) child->set_rowtable(rowtable);
 }
 
 } /* namespace ramulator */

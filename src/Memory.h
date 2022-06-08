@@ -11,13 +11,15 @@
 #include "HBM.h"
 #include "LPDDR3.h"
 #include "LPDDR4.h"
-#include "WideIO2.h"
+//#include "WideIO2.h"
 #include "DSARP.h"
 #include <vector>
 #include <functional>
 #include <cmath>
 #include <cassert>
 #include <tuple>
+
+#include "DDR4_PIM.h"
 
 using namespace std;
 
@@ -65,6 +67,8 @@ protected:
   ScalarStat in_queue_read_req_num_avg;
   ScalarStat in_queue_write_req_num_avg;
 
+  VectorStat num_wisedram_requests;
+
 #ifndef INTEGRATED_WITH_GEM5
   VectorStat record_read_requests;
   VectorStat record_write_requests;
@@ -78,7 +82,7 @@ public:
         ChRaBaRoCo,
         RoBaRaCoCh,
         MAX,
-    } type = Type::RoBaRaCoCh;
+    } type = Type::ChRaBaRoCo;
 
     enum class Translation {
       None,
@@ -254,6 +258,13 @@ public:
             ;
 #endif
 
+        num_wisedram_requests
+            .init(configs.get_core_num())
+            .name("wisedram_requests")
+            .desc("Number of incoming wisedram requests to DRAM per core")
+            .precision(0)
+            ;
+
     }
 
     ~Memory()
@@ -341,6 +352,9 @@ public:
             }
             if (req.type == Request::Type::WRITE) {
               ++num_write_requests[coreid];
+            }
+            if(req.type == Request::Type::TRAIN_BATCH) {
+                ++num_wisedram_requests[coreid];
             }
             ++incoming_requests_per_channel[req.addr_vec[int(T::Level::Channel)]];
             return true;
@@ -489,8 +503,12 @@ public:
     int pending_requests()
     {
         int reqs = 0;
-        for (auto ctrl: ctrls)
+        for (auto ctrl: ctrls) {
             reqs += ctrl->readq.size() + ctrl->writeq.size() + ctrl->otherq.size() + ctrl->actq.size() + ctrl->pending.size();
+            if(ctrl->channel->busy())
+                ++reqs;
+        }
+
         return reqs;
     }
 
